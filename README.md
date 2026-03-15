@@ -458,6 +458,7 @@ serverAuth:
 admin:
   serverName: "MyGameServer"
   rootPasswordHash: ""
+  broadcastPrefix: "§8[§3◆§bBackendBridge§3◆§8] §r"
 
 limits:
   banChangesMaxRows: 1000
