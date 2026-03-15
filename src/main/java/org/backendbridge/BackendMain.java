@@ -48,7 +48,13 @@ public final class BackendMain {
         CommandsRepository commandsRepo = new CommandsRepository(db);
 
         AdminAuth adminAuth = new AdminAuth(db);
-        AdminRepository adminRepo = new AdminRepository(db, cfg.admin().serverName(), usersRepo, metricsRepo);
+        AdminRepository adminRepo = new AdminRepository(
+                db,
+                cfg.admin().serverName(),
+                cfg.admin().broadcastPrefix(),
+                usersRepo,
+                metricsRepo
+        );
 
         HttpApiServer http = new HttpApiServer(
                 cfg,

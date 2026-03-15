@@ -25,7 +25,7 @@ public record AppConfig(
     public record Web(String bind, int port) {}
     public record DbCfg(String jdbcUrl, String username, String password) {}
     public record ServerAuthCfg(boolean enabled, String token) {}
-    public record AdminCfg(String serverName, String rootPasswordHash) {}
+    public record AdminCfg(String serverName, String rootPasswordHash, String broadcastPrefix) {}
 
     @SuppressWarnings("unchecked")
     public static AppConfig loadFromResource(String resourceName) {
@@ -98,6 +98,8 @@ public record AppConfig(
               serverName: "MyServer"
               # Leave empty to auto-generate a root password on first start (printed to console once)
               rootPasswordHash: ""
+              # Prefix added automatically to BROADCAST messages
+              broadcastPrefix: "§8[§bBackendBridge§8] §r"
             """;
     }
 
@@ -128,7 +130,8 @@ public record AppConfig(
 
         AdminCfg ac = new AdminCfg(
                 String.valueOf(admin.getOrDefault("serverName", "MyServer")),
-                String.valueOf(admin.getOrDefault("rootPasswordHash", ""))
+                String.valueOf(admin.getOrDefault("rootPasswordHash", "")),
+                String.valueOf(admin.getOrDefault("broadcastPrefix", "§8[§bBackendBridge§8] §r"))
         );
 
         AppConfig cfg = new AppConfig(w, d, sa, ac);

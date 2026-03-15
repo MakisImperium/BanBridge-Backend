@@ -29,6 +29,7 @@ CREATE TABLE players (
 
                          online            TINYINT(1)   NOT NULL DEFAULT 0,
                          online_updated_at TIMESTAMP(3) NULL,
+                         online_server_key VARCHAR(64)  NULL,
 
                          last_ip           VARCHAR(45)  NULL,
                          last_hwid         VARCHAR(128) NULL,
@@ -36,8 +37,13 @@ CREATE TABLE players (
                          PRIMARY KEY (xuid),
                          KEY idx_players_last_seen (last_seen_at),
                          KEY idx_players_online (online, online_updated_at),
+                         KEY idx_players_online_server (online_server_key),
                          KEY idx_players_last_ip (last_ip),
-                         KEY idx_players_last_hwid (last_hwid)
+                         KEY idx_players_last_hwid (last_hwid),
+
+                         CONSTRAINT fk_players_online_server
+                             FOREIGN KEY (online_server_key) REFERENCES servers(server_key)
+                                 ON DELETE SET NULL
 );
 
 CREATE TABLE player_stats (
@@ -176,11 +182,11 @@ CREATE TABLE web_role_permissions (
 );
 
 -- =========================================================
--- Admin audit log (release-grade observability)
+-- Admin audit log
 -- =========================================================
 
 CREATE TABLE IF NOT EXISTS admin_audit_log (
-                                               id            BIGINT NOT NULL AUTO_INCREMENT,
+                                               id             BIGINT NOT NULL AUTO_INCREMENT,
                                                actor_username VARCHAR(64) NULL,
     action_key     VARCHAR(96) NOT NULL,
     details        TEXT NULL,
@@ -189,7 +195,6 @@ CREATE TABLE IF NOT EXISTS admin_audit_log (
     KEY idx_audit_created_at (created_at),
     KEY idx_audit_actor (actor_username, created_at)
     );
-
 
 INSERT IGNORE INTO web_roles(role_key, display_name) VALUES
   ('admin', 'Admin'),
@@ -205,8 +210,7 @@ INSERT IGNORE INTO web_permissions(perm_key, description) VALUES
   ('bans.unban', 'Can unban players'),
   ('bans.ban', 'Can ban players'),
   ('audit.view', 'Can view admin audit log'),
-  ('server.commands', 'Can send server commands (shutdown/refresh)');
-
+  ('server.commands', 'Can send server commands');
 
 INSERT IGNORE INTO web_role_permissions(role_id, perm_id)
 SELECT r.id, p.id
@@ -222,7 +226,7 @@ WHERE r.role_key = 'supporter'
   AND p.perm_key IN ('players.view','players.presence','bans.view','bans.unban','stats.view');
 
 -- =========================================================
--- Server metrics (latest snapshot + full history)
+-- Server metrics
 -- =========================================================
 
 CREATE TABLE server_metrics_latest (
@@ -270,13 +274,13 @@ CREATE TABLE server_metrics (
 );
 
 -- =========================================================
--- Backend -> Client commands (client polls)
+-- Backend -> Client commands
 -- =========================================================
 
 CREATE TABLE server_commands (
                                  id              BIGINT NOT NULL AUTO_INCREMENT,
                                  server_key      VARCHAR(64) NOT NULL,
-                                 cmd_type        ENUM('SHUTDOWN','REFRESH_BANS') NOT NULL,
+                                 cmd_type        ENUM('SHUTDOWN','REFRESH_BANS','KICK','MESSAGE','BROADCAST') NOT NULL,
                                  payload_json    TEXT NULL,
                                  created_at      TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
                                  acknowledged_at TIMESTAMP(3) NULL,

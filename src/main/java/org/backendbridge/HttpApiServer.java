@@ -5,20 +5,37 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.backendbridge.adminui.Lang;
-import org.backendbridge.repo.*;
+import org.backendbridge.repo.AdminRepository;
+import org.backendbridge.repo.BansRepository;
+import org.backendbridge.repo.CommandsRepository;
+import org.backendbridge.repo.MetricsRepository;
+import org.backendbridge.repo.PresenceRepository;
+import org.backendbridge.repo.StatsRepository;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Timestamp;
 
 public final class HttpApiServer {
 
     private static final String LANG_COOKIE = "bb_lang";
+    private static final String COOKIE_CONSENT_COOKIE = "bb_cookie_consent";
+
+    private static final Duration PRESENCE_STALE_AFTER = Duration.ofSeconds(90);
+    private static final Duration PRESENCE_SWEEP_EVERY = Duration.ofSeconds(30);
 
     private final AppConfig cfg;
     private final Db db;
@@ -35,6 +52,7 @@ public final class HttpApiServer {
     private final AdminRepository adminRepo;
 
     private HttpServer server;
+    private ScheduledExecutorService sweeper;
 
     public HttpApiServer(
             AppConfig cfg,
@@ -63,8 +81,6 @@ public final class HttpApiServer {
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(cfg.web().bind(), cfg.web().port()), 0);
         server.setExecutor(Executors.newFixedThreadPool(12));
-
-        // ---------------- API ----------------
 
         server.createContext("/api/server/health", ex -> handleSafely(ex, () -> {
             requireMethod(ex, "GET");
@@ -119,6 +135,7 @@ public final class HttpApiServer {
                 return;
             }
 
+            touchServerSeen(serverKey);
             metricsRepo.ingest(serverKey, root);
             sendEmpty(ex, 200);
         }));
@@ -131,13 +148,21 @@ public final class HttpApiServer {
             }
 
             JsonNode root = JsonUtil.OM.readTree(ex.getRequestBody().readAllBytes());
-            JsonNode players = root.get("players");
+
+            String serverKey = root.path("serverKey").asText(null);
+            if (serverKey == null || serverKey.isBlank()) {
+                sendJson(ex, 400, "{\"error\":\"bad_request\",\"details\":\"serverKey missing\"}");
+                return;
+            }
+
+            JsonNode players = root.isArray() ? root : root.get("players");
             if (players == null || !players.isArray()) {
                 sendJson(ex, 400, "{\"error\":\"bad_request\",\"details\":\"players array missing\"}");
                 return;
             }
 
-            presenceRepo.upsertPresencePlayersArray(players);
+            touchServerSeen(serverKey);
+            presenceRepo.upsertPresence(serverKey, root);
             sendEmpty(ex, 200);
         }));
 
@@ -156,6 +181,7 @@ public final class HttpApiServer {
                 return;
             }
 
+            touchServerSeen(serverKey);
             bansRepo.reportServerBan(serverKey, ban);
             sendEmpty(ex, 200);
         }));
@@ -173,8 +199,14 @@ public final class HttpApiServer {
                 return;
             }
 
+            touchServerSeen(serverKey);
+
             long sinceId = 0L;
-            try { sinceId = Long.parseLong(String.valueOf(queryParam(ex, "sinceId"))); } catch (Exception ignored) {}
+            try {
+                sinceId = Long.parseLong(String.valueOf(queryParam(ex, "sinceId")));
+            } catch (Exception ignored) {
+                // keep 0
+            }
 
             sendJson(ex, 200, commandsRepo.pollOpenCommandsJson(serverKey, sinceId, 50));
         }));
@@ -195,11 +227,10 @@ public final class HttpApiServer {
                 return;
             }
 
+            touchServerSeen(serverKey);
             commandsRepo.ackCommand(serverKey, id);
             sendEmpty(ex, 200);
         }));
-
-        // ---------------- Admin language ----------------
 
         server.createContext("/admin/lang", ex -> handleSafely(ex, () -> {
             requireMethod(ex, "GET");
@@ -216,7 +247,21 @@ public final class HttpApiServer {
             redirect(ex, back);
         }));
 
-        // ---------------- Admin pages ----------------
+        server.createContext("/admin/cookies", ex -> handleSafely(ex, () -> {
+            requireMethod(ex, "POST");
+
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String decision = formField(body, "decision");
+            String back = formField(body, "back");
+
+            String normalized = "accepted".equalsIgnoreCase(decision) ? "accepted" : "declined";
+            setCookie(ex, COOKIE_CONSENT_COOKIE, normalized, false, 365 * 24 * 3600);
+
+            if (back == null || back.isBlank() || !back.startsWith("/")) {
+                back = "/admin/players";
+            }
+            redirect(ex, back);
+        }));
 
         server.createContext("/admin/login", ex -> handleSafely(ex, () -> {
             Lang lang = requestLang(ex);
@@ -232,13 +277,14 @@ public final class HttpApiServer {
             String pass = formField(body, "password");
 
             boolean ok = adminAuth.login(ex, user, pass);
-            redirect(ex, ok ? "/admin/players" : "/admin/login?err=bad_credentials");
+            redirect(ex, ok ? "/admin/players?toastType=success&toast=" + urlEncodeQuery("Login successful")
+                    : "/admin/login?err=bad_credentials&toastType=error&toast=" + urlEncodeQuery("Login failed"));
         }));
 
         server.createContext("/admin/logout", ex -> handleSafely(ex, () -> {
             requireMethod(ex, "GET");
             adminAuth.logout(ex);
-            redirect(ex, "/admin/login");
+            redirect(ex, "/admin/login?toastType=success&toast=" + urlEncodeQuery("Logged out"));
         }));
 
         server.createContext("/admin/account", ex -> handleSafely(ex, () -> {
@@ -266,15 +312,18 @@ public final class HttpApiServer {
             String newPassword2 = formField(body, "newPassword2");
 
             if (newPassword == null || newPassword.isBlank() || !Objects.equals(newPassword, newPassword2)) {
-                redirect(ex, "/admin/account?err=" + urlEncodeQuery("Password confirmation does not match"));
+                redirect(ex, "/admin/account?err=" + urlEncodeQuery("Password confirmation does not match")
+                        + "&toastType=error&toast=" + urlEncodeQuery("Password confirmation does not match"));
                 return;
             }
 
             try {
                 adminRepo.changeOwnPassword(username, currentPassword, newPassword);
-                redirect(ex, "/admin/account?ok=" + urlEncodeQuery("Password updated"));
+                redirect(ex, "/admin/account?ok=" + urlEncodeQuery("Password updated")
+                        + "&toastType=success&toast=" + urlEncodeQuery("Password updated"));
             } catch (IllegalArgumentException iae) {
-                redirect(ex, "/admin/account?err=" + urlEncodeQuery(String.valueOf(iae.getMessage())));
+                redirect(ex, "/admin/account?err=" + urlEncodeQuery(String.valueOf(iae.getMessage()))
+                        + "&toastType=error&toast=" + urlEncodeQuery(String.valueOf(iae.getMessage())));
             }
         }));
 
@@ -287,10 +336,28 @@ public final class HttpApiServer {
             sendHtml(ex, 200, adminRepo.renderPlayersHtml(lang));
         }));
 
+        server.createContext("/admin/players/broadcast", ex -> handleSafely(ex, () -> {
+            requireMethod(ex, "POST");
+            if (!requireAdmin(ex)) return;
+            if (!requirePerm(ex, "server.commands")) return;
+
+            String actorUsername = adminAuth.loggedInUsername(ex);
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+
+            try {
+                adminRepo.broadcastMessage(actorUsername, formField(body, "serverKey"), formField(body, "message"));
+                redirect(ex, "/admin/players?toastType=success&toast=" + urlEncodeQuery("Broadcast queued"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/players?toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
+        }));
+
         server.createContext("/admin/player/ban", ex -> handleSafely(ex, () -> {
             requireMethod(ex, "POST");
             if (!requireAdmin(ex)) return;
             if (!requirePerm(ex, "players.view")) return;
+
+            String actorUsername = adminAuth.loggedInUsername(ex);
 
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             String xuid = formField(body, "xuid");
@@ -300,10 +367,18 @@ public final class HttpApiServer {
             try {
                 String h = formField(body, "hours");
                 if (h != null && !h.isBlank()) hours = Integer.parseInt(h.trim());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // keep null
+            }
 
-            adminRepo.banPlayerByXuid(xuid, reason, hours);
-            redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid) + "&ok=" + urlEncodeQuery("Banned"));
+            try {
+                adminRepo.banPlayerByXuid(actorUsername, xuid, reason, hours);
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=success&toast=" + urlEncodeQuery("Player banned"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
         }));
 
         server.createContext("/admin/player/unban", ex -> handleSafely(ex, () -> {
@@ -311,11 +386,57 @@ public final class HttpApiServer {
             if (!requireAdmin(ex)) return;
             if (!requirePerm(ex, "players.view")) return;
 
+            String actorUsername = adminAuth.loggedInUsername(ex);
+
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             String xuid = formField(body, "xuid");
 
-            adminRepo.unbanPlayerByXuid(xuid);
-            redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid) + "&ok=" + urlEncodeQuery("Unbanned"));
+            try {
+                adminRepo.unbanPlayerByXuid(actorUsername, xuid);
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=success&toast=" + urlEncodeQuery("Player unbanned"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
+        }));
+
+        server.createContext("/admin/player/kick", ex -> handleSafely(ex, () -> {
+            requireMethod(ex, "POST");
+            if (!requireAdmin(ex)) return;
+            if (!requirePerm(ex, "server.commands")) return;
+
+            String actorUsername = adminAuth.loggedInUsername(ex);
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String xuid = formField(body, "xuid");
+
+            try {
+                adminRepo.kickPlayer(actorUsername, formField(body, "serverKey"), xuid, formField(body, "reason"));
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=success&toast=" + urlEncodeQuery("Kick queued"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
+        }));
+
+        server.createContext("/admin/player/message", ex -> handleSafely(ex, () -> {
+            requireMethod(ex, "POST");
+            if (!requireAdmin(ex)) return;
+            if (!requirePerm(ex, "server.commands")) return;
+
+            String actorUsername = adminAuth.loggedInUsername(ex);
+            String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            String xuid = formField(body, "xuid");
+
+            try {
+                adminRepo.messagePlayer(actorUsername, formField(body, "serverKey"), xuid, formField(body, "message"));
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=success&toast=" + urlEncodeQuery("Message queued"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/player?xuid=" + urlEncodeQuery(xuid)
+                        + "&toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
         }));
 
         server.createContext("/admin/player", ex -> handleSafely(ex, () -> {
@@ -356,12 +477,22 @@ public final class HttpApiServer {
             if (!requireAdmin(ex)) return;
             if (!requirePerm(ex, "users.manage")) return;
 
+            String actorUsername = adminAuth.loggedInUsername(ex);
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            long roleId = 0;
-            try { roleId = Long.parseLong(Objects.toString(formField(body, "roleId"), "0").trim()); } catch (Exception ignored) {}
 
-            adminRepo.createUser(formField(body, "username"), formField(body, "password"), roleId);
-            redirect(ex, "/admin/users?ok=" + urlEncodeQuery("User created"));
+            long roleId = 0;
+            try {
+                roleId = Long.parseLong(Objects.toString(formField(body, "roleId"), "0").trim());
+            } catch (Exception ignored) {
+                // keep 0
+            }
+
+            try {
+                adminRepo.createUser(actorUsername, formField(body, "username"), formField(body, "password"), roleId);
+                redirect(ex, "/admin/users?toastType=success&toast=" + urlEncodeQuery("User created"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/users?toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
         }));
 
         server.createContext("/admin/users/role/set", ex -> handleSafely(ex, () -> {
@@ -369,12 +500,22 @@ public final class HttpApiServer {
             if (!requireAdmin(ex)) return;
             if (!requirePerm(ex, "users.manage")) return;
 
+            String actorUsername = adminAuth.loggedInUsername(ex);
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            long roleId = 0;
-            try { roleId = Long.parseLong(Objects.toString(formField(body, "roleId"), "0").trim()); } catch (Exception ignored) {}
 
-            adminRepo.setUserRole(formField(body, "username"), roleId);
-            redirect(ex, "/admin/users?ok=" + urlEncodeQuery("Role updated"));
+            long roleId = 0;
+            try {
+                roleId = Long.parseLong(Objects.toString(formField(body, "roleId"), "0").trim());
+            } catch (Exception ignored) {
+                // keep 0
+            }
+
+            try {
+                adminRepo.setUserRole(actorUsername, formField(body, "username"), roleId);
+                redirect(ex, "/admin/users?toastType=success&toast=" + urlEncodeQuery("Role updated"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/users?toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
         }));
 
         server.createContext("/admin/users/reset", ex -> handleSafely(ex, () -> {
@@ -382,9 +523,15 @@ public final class HttpApiServer {
             if (!requireAdmin(ex)) return;
             if (!requirePerm(ex, "users.manage")) return;
 
+            String actorUsername = adminAuth.loggedInUsername(ex);
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            adminRepo.resetPassword(formField(body, "username"), formField(body, "password"));
-            redirect(ex, "/admin/users?ok=" + urlEncodeQuery("Password reset"));
+
+            try {
+                adminRepo.resetPassword(actorUsername, formField(body, "username"), formField(body, "password"));
+                redirect(ex, "/admin/users?toastType=success&toast=" + urlEncodeQuery("Password reset"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/users?toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
         }));
 
         server.createContext("/admin/roles", ex -> handleSafely(ex, () -> {
@@ -401,9 +548,15 @@ public final class HttpApiServer {
             if (!requireAdmin(ex)) return;
             if (!requirePerm(ex, "roles.manage")) return;
 
+            String actorUsername = adminAuth.loggedInUsername(ex);
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            adminRepo.createRole(formField(body, "roleKey"), formField(body, "displayName"));
-            redirect(ex, "/admin/roles?ok=" + urlEncodeQuery("Role created"));
+
+            try {
+                adminRepo.createRole(actorUsername, formField(body, "roleKey"), formField(body, "displayName"));
+                redirect(ex, "/admin/roles?toastType=success&toast=" + urlEncodeQuery("Role created"));
+            } catch (Exception e) {
+                redirect(ex, "/admin/roles?toastType=error&toast=" + urlEncodeQuery(String.valueOf(e.getMessage())));
+            }
         }));
 
         server.createContext("/admin/roles/perms/set", ex -> handleSafely(ex, () -> {
@@ -411,16 +564,23 @@ public final class HttpApiServer {
             if (!requireAdmin(ex)) return;
             if (!requirePerm(ex, "roles.manage")) return;
 
+            String actorUsername = adminAuth.loggedInUsername(ex);
             String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
 
             long roleId = 0;
-            try { roleId = Long.parseLong(Objects.toString(formField(body, "roleId"), "0").trim()); } catch (Exception ignored) {}
+            try {
+                roleId = Long.parseLong(Objects.toString(formField(body, "roleId"), "0").trim());
+            } catch (Exception ignored) {
+                // keep 0
+            }
 
             String permKey = formField(body, "permKey");
             String enabledStr = formField(body, "enabled");
-            boolean enabled = "1".equals(enabledStr) || "true".equalsIgnoreCase(enabledStr) || "on".equalsIgnoreCase(enabledStr);
+            boolean enabled = "1".equals(enabledStr)
+                    || "true".equalsIgnoreCase(enabledStr)
+                    || "on".equalsIgnoreCase(enabledStr);
 
-            adminRepo.setRolePermission(roleId, permKey, enabled);
+            adminRepo.setRolePermission(actorUsername, roleId, permKey, enabled);
             sendEmpty(ex, 200);
         }));
 
@@ -432,8 +592,6 @@ public final class HttpApiServer {
             Lang lang = requestLang(ex);
             sendHtml(ex, 200, adminRepo.renderServerStatsHtml(lang, queryParam(ex, "serverKey")));
         }));
-
-        // ---------------- NEW: Audit page ----------------
 
         server.createContext("/admin/audit", ex -> handleSafely(ex, () -> {
             requireMethod(ex, "GET");
@@ -450,12 +608,56 @@ public final class HttpApiServer {
             try {
                 String lim = queryParam(ex, "limit");
                 if (lim != null && !lim.isBlank()) limit = Integer.parseInt(lim.trim());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // keep null
+            }
 
-            sendHtml(ex, 200, adminRepo.renderAuditHtml(lang, queryParam(ex, "ok"), queryParam(ex, "err"), actor, action, q, limit));
+            sendHtml(ex, 200, adminRepo.renderAuditHtml(
+                    lang,
+                    queryParam(ex, "ok"),
+                    queryParam(ex, "err"),
+                    actor,
+                    action,
+                    q,
+                    limit
+            ));
         }));
 
-        // -------- Admin live endpoints --------
+        server.createContext("/admin/api/live/players", ex -> handleSafely(ex, () -> {
+            requireMethod(ex, "GET");
+            if (!requireAdmin(ex)) return;
+            if (!requirePerm(ex, "players.view")) return;
+
+            sendJson(ex, 200, adminRepo.playersLiveJson());
+        }));
+
+        server.createContext("/admin/api/live/bans", ex -> handleSafely(ex, () -> {
+            requireMethod(ex, "GET");
+            if (!requireAdmin(ex)) return;
+            if (!requirePerm(ex, "bans.view")) return;
+
+            sendJson(ex, 200, adminRepo.bansLiveJson());
+        }));
+
+        server.createContext("/admin/api/live/audit", ex -> handleSafely(ex, () -> {
+            requireMethod(ex, "GET");
+            if (!requireAdmin(ex)) return;
+            if (!requirePerm(ex, "audit.view")) return;
+
+            String actor = queryParam(ex, "actor");
+            String action = queryParam(ex, "action");
+            String q = queryParam(ex, "q");
+
+            Integer limit = null;
+            try {
+                String lim = queryParam(ex, "limit");
+                if (lim != null && !lim.isBlank()) limit = Integer.parseInt(lim.trim());
+            } catch (Exception ignored) {
+                // keep null
+            }
+
+            sendJson(ex, 200, adminRepo.auditLiveJson(actor, action, q, limit));
+        }));
 
         server.createContext("/admin/api/live/stats/history", ex -> handleSafely(ex, () -> {
             requireMethod(ex, "GET");
@@ -464,7 +666,11 @@ public final class HttpApiServer {
 
             String serverKey = queryParam(ex, "serverKey");
             int limit = 600;
-            try { limit = Integer.parseInt(Objects.toString(queryParam(ex, "limit"), "600").trim()); } catch (Exception ignored) {}
+            try {
+                limit = Integer.parseInt(Objects.toString(queryParam(ex, "limit"), "600").trim());
+            } catch (Exception ignored) {
+                // keep default
+            }
 
             sendJson(ex, 200, adminRepo.statsHistoryJson(serverKey, limit));
         }));
@@ -509,11 +715,34 @@ public final class HttpApiServer {
         }));
 
         server.start();
+
+        sweeper = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "bb-presence-sweeper");
+            t.setDaemon(true);
+            return t;
+        });
+        sweeper.scheduleAtFixedRate(() -> {
+            try {
+                presenceRepo.markStaleOffline(PRESENCE_STALE_AFTER);
+            } catch (Throwable ignored) {
+                // best-effort
+            }
+        }, PRESENCE_SWEEP_EVERY.toSeconds(), PRESENCE_SWEEP_EVERY.toSeconds(), TimeUnit.SECONDS);
+
         System.out.println("[BackendBridgeService] Listening on http://" + cfg.web().bind() + ":" + cfg.web().port());
         System.out.println("[BackendBridgeService] Server auth enabled: " + serverAuth.isEnabled());
     }
 
     public void stop() {
+        if (sweeper != null) {
+            try {
+                sweeper.shutdownNow();
+            } catch (Exception ignored) {
+                // ignore
+            }
+            sweeper = null;
+        }
+
         if (server != null) {
             server.stop(1);
             server = null;
@@ -521,7 +750,9 @@ public final class HttpApiServer {
     }
 
     @FunctionalInterface
-    private interface ExchangeHandler { void run() throws Exception; }
+    private interface ExchangeHandler {
+        void run() throws Exception;
+    }
 
     private static void handleSafely(HttpExchange ex, ExchangeHandler h) {
         try {
@@ -533,7 +764,10 @@ public final class HttpApiServer {
         } catch (Exception e) {
             safeHtml(ex, 500, "<h1>500</h1><pre>" + esc(e) + "</pre>");
         } finally {
-            try { ex.close(); } catch (Exception ignored) {}
+            try {
+                ex.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -541,7 +775,10 @@ public final class HttpApiServer {
         try {
             sendHtml(ex, status, html);
         } catch (Exception ignored) {
-            try { ex.sendResponseHeaders(status, -1); } catch (Exception ignored2) {}
+            try {
+                ex.sendResponseHeaders(status, -1);
+            } catch (Exception ignored2) {
+            }
         }
     }
 
@@ -553,7 +790,7 @@ public final class HttpApiServer {
 
     private boolean requirePerm(HttpExchange ex, String permKey) throws IOException {
         if (adminAuth.hasPermission(ex, permKey)) return true;
-        redirect(ex, "/admin/players?err=forbidden");
+        redirect(ex, "/admin/players?err=forbidden&toastType=error&toast=" + urlEncodeQuery("Forbidden"));
         return false;
     }
 
@@ -565,10 +802,24 @@ public final class HttpApiServer {
         if (!isMethod(ex, method)) throw new MethodNotAllowed();
     }
 
-    private static final class MethodNotAllowed extends Exception {}
+    private static final class MethodNotAllowed extends Exception {
+    }
 
     private static Lang requestLang(HttpExchange ex) {
         return Lang.fromCookieOrDefault(cookie(ex, LANG_COOKIE));
+    }
+
+    private void touchServerSeen(String serverKey) {
+        if (serverKey == null || serverKey.isBlank()) return;
+        try (Connection c = db.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE servers SET last_seen_at=CURRENT_TIMESTAMP(3) WHERE server_key=?"
+             )) {
+            ps.setString(1, serverKey.trim());
+            ps.executeUpdate();
+        } catch (Exception ignored) {
+            // best effort
+        }
     }
 
     private static String cookie(HttpExchange ex, String name) {
@@ -655,8 +906,11 @@ public final class HttpApiServer {
     }
 
     private static String urlDecode(String s) {
-        try { return URLDecoder.decode(s, StandardCharsets.UTF_8); }
-        catch (Exception e) { return s; }
+        try {
+            return URLDecoder.decode(s, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return s;
+        }
     }
 
     private static String urlEncodeQuery(String s) {

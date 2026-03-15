@@ -2,14 +2,6 @@ package org.backendbridge.adminui;
 
 import static org.backendbridge.adminui.AdminUiUtil.esc;
 
-/**
- * Shared HTML chrome:
- * - inline CSS (no assets)
- * - inline JS (tables, copy-to-clipboard, role toggle saving)
- * - global timestamp formatting for DE/EN with official IANA timezones
- *
- * Important: timestamps are formatted client-side from elements with [data-iso] attributes.
- */
 public final class AdminPageChrome {
 
     private AdminPageChrome() {}
@@ -33,12 +25,12 @@ public final class AdminPageChrome {
                     --ease: cubic-bezier(.22, 1, .36, 1);
                     --durFast: 140ms;
                     --dur: 260ms;
-
                     --btnShadow: 0 14px 34px rgba(2,6,23,.18);
                   }
 
                   *{box-sizing:border-box;}
                   html,body{height:100%;}
+                  html{scroll-behavior:smooth;}
                   body{
                     margin:0;
                     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Arial,sans-serif;
@@ -48,9 +40,40 @@ public final class AdminPageChrome {
                     -webkit-font-smoothing: antialiased;
                     -moz-osx-font-smoothing: grayscale;
                     text-rendering: optimizeLegibility;
+                    position: relative;
                   }
 
-                  /* Theme used on all non-login pages (appShellStart adds bb-statsTheme) */
+                  body::before,
+                  body::after{
+                    content:"";
+                    position:fixed;
+                    inset:auto;
+                    width:460px;
+                    height:460px;
+                    border-radius:50%;
+                    filter: blur(70px);
+                    pointer-events:none;
+                    z-index:0;
+                    opacity:.38;
+                    animation: bbFloatBlob 14s ease-in-out infinite;
+                  }
+                  body::before{
+                    top:-120px;
+                    right:-80px;
+                    background: rgba(59,130,246,.30);
+                  }
+                  body::after{
+                    left:-120px;
+                    bottom:-120px;
+                    background: rgba(168,85,247,.28);
+                    animation-delay:-7s;
+                  }
+
+                  @keyframes bbFloatBlob{
+                    0%,100%{ transform: translate3d(0,0,0) scale(1); }
+                    50%{ transform: translate3d(0,-16px,0) scale(1.06); }
+                  }
+
                   body.bb-statsTheme{
                     background:
                       radial-gradient(1200px 600px at 10% 20%, rgba(34,197,94,.20), transparent 60%),
@@ -60,8 +83,10 @@ public final class AdminPageChrome {
                     color: rgba(255,255,255,.92);
                   }
                   body.bb-statsTheme .hero,
-                  body.bb-statsTheme .card{
-                    background: rgba(255,255,255,.92);
+                  body.bb-statsTheme .card,
+                  body.bb-statsTheme .bb-gaugeCard,
+                  body.bb-statsTheme .bb-kpiCard,
+                  body.bb-statsTheme .bb-chartCard{
                     color: rgba(15,23,42,.92);
                   }
 
@@ -73,58 +98,95 @@ public final class AdminPageChrome {
                     stroke-linecap:round; stroke-linejoin:round; display:block;
                   }
 
-                  .shell{max-width:1220px; margin:18px auto; padding:0 16px;}
+                  .shell{max-width:1220px; margin:18px auto; padding:0 16px; position:relative; z-index:1;}
                   .content{margin-top:16px;}
 
-                  .bb-reveal{opacity:0; transform: translate3d(0,4px,0);
-                    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
-                  .bb-reveal.in{opacity:1; transform: translate3d(0,0,0); }
+                  .bb-reveal{
+                    opacity:0;
+                    transform: translate3d(0,14px,0) scale(.985);
+                    transition:
+                      opacity var(--dur) var(--ease),
+                      transform var(--dur) var(--ease),
+                      box-shadow var(--dur) var(--ease);
+                  }
+                  .bb-reveal.in{
+                    opacity:1;
+                    transform: translate3d(0,0,0) scale(1);
+                  }
 
                   .top{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:10px 0 14px; color: rgba(255,255,255,.92);}
-                  .bb-serverBadge{display:inline-flex; align-items:center; gap:10px; padding:8px 12px; border-radius:999px;
-                    background: rgba(255,255,255,.92); border: 1px solid rgba(255,255,255,.55); box-shadow: 0 14px 40px rgba(2,6,23,.14); color: rgba(15,23,42,.90);}
-                  .bb-serverLogo{width:28px; height:28px; border-radius:10px; background: rgba(15,23,42,.04); border: 1px solid rgba(15,23,42,.08);
-                    display:flex; align-items:center; justify-content:center; overflow:hidden;}
+                  .bb-serverBadge{
+                    display:inline-flex; align-items:center; gap:10px; padding:8px 12px; border-radius:999px;
+                    background: rgba(255,255,255,.92); border:1px solid rgba(255,255,255,.55);
+                    box-shadow: 0 14px 40px rgba(2,6,23,.14); color: rgba(15,23,42,.90);
+                  }
+                  .bb-serverLogo{
+                    width:28px; height:28px; border-radius:10px; background: rgba(15,23,42,.04);
+                    border:1px solid rgba(15,23,42,.08); display:flex; align-items:center; justify-content:center; overflow:hidden;
+                  }
                   .bb-serverLogo svg{width:18px; height:18px;}
                   .bb-serverLogoImg{ width:100%; height:100%; object-fit:cover; display:block; }
                   .bb-serverName{font-weight:700; letter-spacing:.01em; font-size:13px;}
 
-                  .menu{display:flex; gap:12px; flex-wrap:wrap; padding:10px 12px; border-radius:999px;
-                    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); backdrop-filter: blur(10px); color: rgba(255,255,255,.92);}
+                  .menu{
+                    display:flex; gap:12px; flex-wrap:wrap; padding:10px 12px; border-radius:999px;
+                    background: rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.22);
+                    backdrop-filter: blur(10px); color: rgba(255,255,255,.92);
+                  }
                   .tab{padding:10px 14px; border-radius:999px; display:inline-flex; gap:10px; align-items:center; border:1px solid transparent;}
                   .tab.active{background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.30);}
 
                   .hero{
-                    padding:22px 18px;
-                    border-radius: var(--radius);
-                    background: var(--cardBg);
-                    border:1px solid rgba(15,23,42,.08);
+                    padding:24px 20px;
+                    border-radius:22px;
+                    background: linear-gradient(180deg, rgba(255,255,255,.97), rgba(255,255,255,.90));
+                    border:1px solid rgba(255,255,255,.35);
                     box-shadow: var(--shadow);
                     text-align:center;
+                    backdrop-filter: blur(14px);
                   }
                   .hero h1{margin:0; font-size:28px;}
                   .bb-heroSub{opacity:.75; margin-top:6px; text-align:center;}
 
-                  .card{margin-top:16px; border-radius: var(--radius); overflow:hidden; background: var(--cardBg); border:1px solid rgba(15,23,42,.08); box-shadow: var(--shadow);}
-                  .cardHead{padding:14px 16px 10px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; align-items:center; border-bottom: 1px solid rgba(15,23,42,.06);}
+                  .card{
+                    margin-top:16px;
+                    border-radius:22px;
+                    overflow:hidden;
+                    background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.90));
+                    border:1px solid rgba(255,255,255,.30);
+                    box-shadow: var(--shadow);
+                    backdrop-filter: blur(14px);
+                    transition: transform var(--durFast) var(--ease), box-shadow var(--durFast) var(--ease);
+                  }
+                  .card:hover{
+                    transform: translateY(-2px);
+                    box-shadow: 0 28px 90px rgba(2,6,23,.18);
+                  }
+
+                  .cardHead{padding:14px 16px 10px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; align-items:center; border-bottom:1px solid rgba(15,23,42,.06);}
                   .pad{padding:16px;}
 
                   .mono{font-family: ui-monospace, Consolas, monospace; font-size:12px; color: rgba(15,23,42,.75);}
+                  .sub{opacity:.65; font-size:12px;}
 
                   .btn{
                     padding:10px 14px;
-                    border-radius: 14px;
+                    border-radius:14px;
                     border:1px solid rgba(15,23,42,.14);
                     background: rgba(255,255,255,.86);
                     cursor:pointer;
                     display:inline-flex;
                     gap:10px;
                     align-items:center;
-                    font-weight: 700;
-                    transition: transform var(--durFast) var(--ease), box-shadow var(--durFast) var(--ease), filter var(--durFast) var(--ease);
+                    font-weight:700;
+                    transition:
+                      transform var(--durFast) var(--ease),
+                      box-shadow var(--durFast) var(--ease),
+                      filter var(--durFast) var(--ease),
+                      background var(--durFast) var(--ease);
                   }
-                  .btn:hover{ transform: translateY(-1px); box-shadow: var(--btnShadow); }
-                  .btn:active{ transform: translateY(0); filter: brightness(.98); }
+                  .btn:hover{ transform: translateY(-2px) scale(1.01); box-shadow: var(--btnShadow); }
+                  .btn:active{ transform: translateY(0) scale(.995); filter: brightness(.98); }
 
                   .btn.primary{
                     border-color: rgba(59,130,246,.55);
@@ -143,7 +205,19 @@ public final class AdminPageChrome {
                   }
 
                   .form{display:flex; flex-direction:column; gap:10px;}
-                  .inp{padding:12px 12px; border-radius:12px; border:1px solid rgba(15,23,42,.10); background: rgba(255,255,255,.95); outline:none;}
+                  .inp{
+                    padding:12px 12px;
+                    border-radius:14px;
+                    border:1px solid rgba(15,23,42,.10);
+                    background: rgba(255,255,255,.95);
+                    outline:none;
+                    transition: border-color var(--durFast) var(--ease), box-shadow var(--durFast) var(--ease), transform var(--durFast) var(--ease);
+                  }
+                  .inp:focus{
+                    border-color: rgba(59,130,246,.45);
+                    box-shadow: 0 0 0 4px rgba(59,130,246,.12);
+                    transform: translateY(-1px);
+                  }
 
                   .pill{padding:3px 10px; border-radius:999px; border:1px solid rgba(15,23,42,.12); font-size:12px; background: rgba(15,23,42,.04);}
                   .pill-ok{ border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.12); color: rgba(21,128,61,.95); }
@@ -152,15 +226,15 @@ public final class AdminPageChrome {
                   .alert{
                     padding:12px 12px;
                     border-radius:14px;
-                    border: 1px solid rgba(15,23,42,.12);
+                    border:1px solid rgba(15,23,42,.12);
                     background: rgba(255,255,255,.85);
-                    margin: 10px 0 12px;
+                    margin:10px 0 12px;
                   }
 
                   .badge{
-                    padding: 6px 10px;
-                    border-radius: 999px;
-                    border: 1px solid rgba(15,23,42,.10);
+                    padding:6px 10px;
+                    border-radius:999px;
+                    border:1px solid rgba(15,23,42,.10);
                     background: rgba(255,255,255,.70);
                   }
 
@@ -168,15 +242,16 @@ public final class AdminPageChrome {
                   thead th{position:sticky; top:0; z-index:2; background: rgba(255,255,255,.92); border-bottom:1px solid rgba(15,23,42,.06);}
                   th,td{padding:12px 12px; border-bottom:1px solid rgba(15,23,42,.06); text-align:left; vertical-align:middle;}
                   th{font-size:12px; letter-spacing:.06em; text-transform:uppercase; color: rgba(15,23,42,.55); cursor:pointer;}
-                  tbody tr:hover{ background: rgba(59,130,246,.06); }
+                  table tbody tr{transition: background var(--durFast) var(--ease), transform var(--durFast) var(--ease);}
+                  tbody tr:hover{ background: rgba(59,130,246,.06); transform: translateX(2px); }
 
                   .bb-tableTools{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
-                  .bb-mini{ padding:10px 12px; border-radius: 12px; border:1px solid rgba(15,23,42,.10); background: rgba(255,255,255,.95); font-size: 13px; outline: none; }
+                  .bb-mini{ padding:10px 12px; border-radius:12px; border:1px solid rgba(15,23,42,.10); background: rgba(255,255,255,.95); font-size:13px; outline:none; }
 
-                  /* Toggle */
                   .bb-toggle{ position:relative; display:inline-flex; width:44px; height:24px; }
                   .bb-toggle input{ opacity:0; width:0; height:0; }
-                  .bb-slider{ position:absolute; inset:0; border-radius:999px; background: rgba(15,23,42,.10); border:1px solid rgba(15,23,42,.12);
+                  .bb-slider{
+                    position:absolute; inset:0; border-radius:999px; background: rgba(15,23,42,.10); border:1px solid rgba(15,23,42,.12);
                     transition: background var(--durFast) var(--ease), border-color var(--durFast) var(--ease);
                   }
                   .bb-slider:before{
@@ -194,7 +269,23 @@ public final class AdminPageChrome {
                     box-shadow: inset 0 0 0 1px rgba(34,197,94,.18);
                   }
 
-                  /* ---------- STATS DASHBOARD LAYOUT (restored) ---------- */
+                  .bb-userCell{display:flex; align-items:center; gap:12px;}
+                  .bb-avatar{
+                    width:32px; height:32px; border-radius:10px; overflow:hidden;
+                    background: rgba(15,23,42,.06); border:1px solid rgba(15,23,42,.08);
+                    flex:0 0 auto;
+                  }
+                  .bb-avatar img{width:100%; height:100%; display:block; object-fit:cover;}
+                  .bb-userMeta{display:flex; flex-direction:column; gap:2px;}
+
+                  .copyable{
+                    display:inline-flex;
+                    align-items:center;
+                    gap:8px;
+                    cursor:pointer;
+                    user-select:all;
+                  }
+
                   .bb-dashGrid{
                     display:grid;
                     gap:12px;
@@ -202,17 +293,17 @@ public final class AdminPageChrome {
                   }
                   .bb-gaugeCard{
                     grid-column: span 6;
-                    border-radius: 16px;
-                    border: 1px solid rgba(15,23,42,.08);
+                    border-radius:16px;
+                    border:1px solid rgba(15,23,42,.08);
                     background: rgba(255,255,255,.92);
                     overflow:hidden;
                   }
                   .bb-kpiCard{
                     grid-column: span 3;
-                    border-radius: 16px;
-                    border: 1px solid rgba(15,23,42,.08);
+                    border-radius:16px;
+                    border:1px solid rgba(15,23,42,.08);
                     background: rgba(255,255,255,.92);
-                    padding: 14px 14px;
+                    padding:14px 14px;
                   }
                   @media (max-width: 980px){
                     .bb-gaugeCard{ grid-column: span 12; }
@@ -227,40 +318,40 @@ public final class AdminPageChrome {
                     align-items:center;
                     justify-content:space-between;
                     gap:10px;
-                    padding: 12px 14px 8px;
-                    border-bottom: 1px solid rgba(15,23,42,.06);
+                    padding:12px 14px 8px;
+                    border-bottom:1px solid rgba(15,23,42,.06);
                   }
-                  .bb-gaugeTitle{ font-weight: 800; letter-spacing:.01em; }
+                  .bb-gaugeTitle{ font-weight:800; letter-spacing:.01em; }
                   .bb-gaugeBadge{
                     font-family: ui-monospace, Consolas, monospace;
-                    font-size: 12px;
-                    padding: 4px 8px;
-                    border-radius: 999px;
-                    border: 1px solid rgba(15,23,42,.10);
+                    font-size:12px;
+                    padding:4px 8px;
+                    border-radius:999px;
+                    border:1px solid rgba(15,23,42,.10);
                     background: rgba(255,255,255,.70);
                   }
                   .bb-gaugeRow{
                     display:flex;
                     align-items:center;
                     gap:14px;
-                    padding: 12px 14px 14px;
+                    padding:12px 14px 14px;
                   }
                   .bb-gaugeValue{ display:flex; flex-direction:column; gap:4px; }
-                  .bb-gaugeBig{ font-size: 26px; font-weight: 900; letter-spacing:.01em; }
+                  .bb-gaugeBig{ font-size:26px; font-weight:900; letter-spacing:.01em; }
 
-                  .bb-kpiTitle{ font-weight: 800; opacity:.85; }
-                  .bb-kpiBig{ font-size: 24px; font-weight: 900; margin-top: 6px; }
+                  .bb-kpiTitle{ font-weight:800; opacity:.85; }
+                  .bb-kpiBig{ font-size:24px; font-weight:900; margin-top:6px; }
 
                   .bb-chartGrid{
-                    margin-top: 12px;
+                    margin-top:12px;
                     display:grid;
                     gap:12px;
                     grid-template-columns: repeat(12, minmax(0,1fr));
                   }
                   .bb-chartCard{
                     grid-column: span 6;
-                    border-radius: 16px;
-                    border: 1px solid rgba(15,23,42,.08);
+                    border-radius:16px;
+                    border:1px solid rgba(15,23,42,.08);
                     background: rgba(255,255,255,.92);
                     overflow:hidden;
                   }
@@ -268,8 +359,8 @@ public final class AdminPageChrome {
                     .bb-chartCard{ grid-column: span 12; }
                   }
                   .bb-chartHead{
-                    padding: 12px 14px 8px;
-                    border-bottom: 1px solid rgba(15,23,42,.06);
+                    padding:12px 14px 8px;
+                    border-bottom:1px solid rgba(15,23,42,.06);
                     display:flex;
                     align-items:center;
                     justify-content:space-between;
@@ -281,19 +372,20 @@ public final class AdminPageChrome {
                     display:block;
                   }
 
-                  /* -------- LOGIN PAGE -------- */
                   .bb-loginWrap{
                     min-height: calc(100vh - 36px);
                     display:flex;
                     align-items:center;
                     justify-content:center;
-                    padding: 18px;
+                    padding:18px;
+                    position:relative;
+                    z-index:1;
                   }
                   .bb-loginCard{
-                    width: min(980px, 100%);
+                    width:min(980px, 100%);
                     display:grid;
                     grid-template-columns: 1.1fr 1fr;
-                    border-radius: 24px;
+                    border-radius:24px;
                     overflow:hidden;
                     background: rgba(255,255,255,.92);
                     border:1px solid rgba(255,255,255,.55);
@@ -304,83 +396,170 @@ public final class AdminPageChrome {
                     .bb-loginLeft{ display:none; }
                   }
                   .bb-loginLeft{
-                    padding: 28px;
+                    padding:28px;
                     background: linear-gradient(135deg, rgba(79,70,229,.92), rgba(168,85,247,.92));
                     color: rgba(255,255,255,.94);
                     display:flex;
                     align-items:center;
                     justify-content:center;
                   }
-                  .bb-illus{ width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; }
+                  .bb-illus{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
                   .bb-illusIcon{
-                    width: 120px; height: 120px;
-                    border-radius: 28px;
+                    width:120px; height:120px;
+                    border-radius:28px;
                     display:flex; align-items:center; justify-content:center;
                     background: rgba(255,255,255,.16);
-                    border: 1px solid rgba(255,255,255,.24);
+                    border:1px solid rgba(255,255,255,.24);
                     box-shadow: 0 18px 50px rgba(2,6,23,.22);
                   }
-                  .bb-illusIcon svg{ width: 62px; height: 62px; stroke: rgba(255,255,255,.95); }
+                  .bb-illusIcon svg{ width:62px; height:62px; stroke: rgba(255,255,255,.95); }
 
-                  .bb-loginRight{ padding: 26px; display:flex; flex-direction:column; justify-content:center; }
-                  .bb-loginTitle{ font-weight: 800; letter-spacing: .01em; font-size: 22px; margin-bottom: 6px; }
+                  .bb-loginRight{ padding:26px; display:flex; flex-direction:column; justify-content:center; }
+                  .bb-loginTitle{ font-weight:800; letter-spacing:.01em; font-size:22px; margin-bottom:6px; }
 
                   .bb-floatField{ position:relative; display:block; }
                   .bb-inputIcon{ position:absolute; left:12px; top:50%; transform: translateY(-50%); opacity:.70; }
                   .bb-floatField input{
                     width:100%;
-                    padding: 14px 12px 14px 40px;
-                    border-radius: 14px;
+                    padding:14px 12px 14px 40px;
+                    border-radius:14px;
                     border:1px solid rgba(15,23,42,.12);
                     background: rgba(255,255,255,.96);
                     outline:none;
                   }
                   .bb-floatLabel{
                     position:absolute;
-                    left: 40px;
-                    top: 50%;
+                    left:40px;
+                    top:50%;
                     transform: translateY(-50%);
                     pointer-events:none;
                     opacity:.55;
                     transition: all var(--durFast) var(--ease);
-                    font-size: 13px;
+                    font-size:13px;
                   }
                   .bb-floatField input:focus + .bb-floatLabel,
                   .bb-floatField input:not(:placeholder-shown) + .bb-floatLabel{
-                    top: 8px;
-                    transform: none;
+                    top:8px;
+                    transform:none;
                     opacity:.70;
-                    font-size: 12px;
+                    font-size:12px;
                   }
 
                   .bb-loginBtn{
-                    margin-top: 6px;
-                    width: 100%;
-                    padding: 12px 14px;
-                    border-radius: 14px;
-                    border: 1px solid rgba(59,130,246,.35);
+                    margin-top:6px;
+                    width:100%;
+                    padding:12px 14px;
+                    border-radius:14px;
+                    border:1px solid rgba(59,130,246,.35);
                     background: rgba(59,130,246,.92);
-                    color: #fff;
-                    font-weight: 800;
-                    letter-spacing: .08em;
-                    cursor: pointer;
+                    color:#fff;
+                    font-weight:800;
+                    letter-spacing:.08em;
+                    cursor:pointer;
                   }
 
-                  /* Toast */
-                  .toast{
-                    position:fixed; right:18px; bottom:18px;
-                    padding:10px 12px; border-radius:12px;
-                    border:1px solid rgba(15,23,42,.12);
-                    background: rgba(255,255,255,.92);
-                    opacity:0; transform: translateY(8px);
-                    transition: opacity var(--durFast) var(--ease), transform var(--durFast) var(--ease);
-                    pointer-events:none; z-index:9999;
+                  .toastStack{
+                    position:fixed;
+                    top:18px;
+                    right:18px;
+                    display:flex;
+                    flex-direction:column;
+                    gap:10px;
+                    z-index:9999;
+                    pointer-events:none;
                   }
-                  .toast.on{opacity:1; transform: translateY(0);}
+                  .toast{
+                    min-width:280px;
+                    max-width:min(420px, calc(100vw - 36px));
+                    padding:12px 14px;
+                    border-radius:16px;
+                    border:1px solid rgba(15,23,42,.10);
+                    background: rgba(255,255,255,.94);
+                    box-shadow: 0 18px 50px rgba(2,6,23,.16);
+                    opacity:0;
+                    transform: translate3d(0,-12px,0) scale(.97);
+                    transition: opacity var(--durFast) var(--ease), transform var(--durFast) var(--ease);
+                    pointer-events:none;
+                    backdrop-filter: blur(12px);
+                  }
+                  .toast.on{ opacity:1; transform: translate3d(0,0,0) scale(1); }
+                  .toast.success{
+                    border-color: rgba(34,197,94,.28);
+                    background: linear-gradient(180deg, rgba(240,253,244,.96), rgba(220,252,231,.93));
+                    color: rgba(21,128,61,.98);
+                  }
+                  .toast.error{
+                    border-color: rgba(239,68,68,.28);
+                    background: linear-gradient(180deg, rgba(254,242,242,.97), rgba(254,226,226,.94));
+                    color: rgba(185,28,28,.98);
+                  }
+                  .toast.info{
+                    border-color: rgba(59,130,246,.28);
+                    background: linear-gradient(180deg, rgba(239,246,255,.97), rgba(219,234,254,.94));
+                    color: rgba(30,64,175,.98);
+                  }
+
+                  .bb-cookieBackdrop{
+                    position:fixed;
+                    inset:0;
+                    background: rgba(2,6,23,.34);
+                    backdrop-filter: blur(6px);
+                    z-index:9997;
+                    opacity:0;
+                    pointer-events:none;
+                    transition: opacity var(--dur) var(--ease);
+                  }
+                  .bb-cookieBackdrop.on{
+                    opacity:1;
+                    pointer-events:auto;
+                  }
+
+                  .bb-cookieBanner{
+                    position:fixed;
+                    top:22px;
+                    left:50%;
+                    transform: translate3d(-50%,-18px,0) scale(.98);
+                    width:min(760px, calc(100vw - 24px));
+                    padding:18px;
+                    border-radius:22px;
+                    border:1px solid rgba(255,255,255,.24);
+                    background: linear-gradient(180deg, rgba(15,23,42,.96), rgba(30,41,59,.95));
+                    color: rgba(255,255,255,.94);
+                    box-shadow: 0 26px 80px rgba(2,6,23,.28);
+                    z-index:9998;
+                    opacity:0;
+                    pointer-events:none;
+                    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+                  }
+                  .bb-cookieBanner.on{
+                    opacity:1;
+                    transform: translate3d(-50%,0,0) scale(1);
+                    pointer-events:auto;
+                  }
+
+                  .bb-cookieActions{
+                    display:flex;
+                    justify-content:flex-end;
+                    gap:10px;
+                    flex-wrap:wrap;
+                    margin-top:14px;
+                  }
                 </style>
               </head>
               <body>
-                <div class="toast" id="bbToast"></div>
+                <div class="toastStack" id="bbToastStack"></div>
+                <div class="bb-cookieBackdrop" id="bbCookieBackdrop"></div>
+                <div class="bb-cookieBanner" id="bbCookieBanner">
+                  <div style="font-size:18px; font-weight:800;">Cookies</div>
+                  <div style="margin-top:8px; opacity:.84; line-height:1.5;">
+                    We use cookies for language, session and better admin usability. Please choose whether you accept them.
+                  </div>
+                  <form method="post" action="/admin/cookies" class="bb-cookieActions">
+                    <input type="hidden" name="back" id="bbCookieBack" value="/admin/players">
+                    <button class="btn" type="submit" name="decision" value="declined">Decline</button>
+                    <button class="btn primary" type="submit" name="decision" value="accepted">Accept</button>
+                  </form>
+                </div>
             """;
         return html.replace("__BB_TITLE__", esc(title));
     }
@@ -389,16 +568,71 @@ public final class AdminPageChrome {
         return """
               <script>
                 (function(){
-                  const toastEl = document.getElementById('bbToast');
-                  function toast(msg){
-                    if(!toastEl) return;
-                    toastEl.textContent = msg;
-                    toastEl.classList.add('on');
-                    clearTimeout(toastEl._t);
-                    toastEl._t = setTimeout(() => toastEl.classList.remove('on'), 1200);
+                  const toastStack = document.getElementById('bbToastStack');
+                  const cookieBanner = document.getElementById('bbCookieBanner');
+                  const cookieBackdrop = document.getElementById('bbCookieBackdrop');
+                  const cookieBack = document.getElementById('bbCookieBack');
+
+                  function toast(msg, type){
+                    if(!toastStack || !msg) return;
+                    const el = document.createElement('div');
+                    el.className = 'toast ' + (type || 'info');
+                    el.textContent = msg;
+                    toastStack.appendChild(el);
+
+                    requestAnimationFrame(() => el.classList.add('on'));
+
+                    window.setTimeout(() => {
+                      el.classList.remove('on');
+                      window.setTimeout(() => el.remove(), 220);
+                    }, 2600);
                   }
 
-                  // -------- Global time formatting for any element with [data-iso] --------
+                  function getCookie(name){
+                    const raw = document.cookie || '';
+                    const parts = raw.split(';');
+                    for(const p of parts){
+                      const part = p.trim();
+                      const idx = part.indexOf('=');
+                      if(idx <= 0) continue;
+                      const k = part.substring(0, idx).trim();
+                      const v = part.substring(idx + 1).trim();
+                      if(k === name) return decodeURIComponent(v);
+                    }
+                    return null;
+                  }
+
+                  function showCookieBanner(){
+                    if(cookieBack) cookieBack.value = location.pathname + location.search;
+                    if(cookieBackdrop) cookieBackdrop.classList.add('on');
+                    if(cookieBanner) cookieBanner.classList.add('on');
+                  }
+
+                  function parseQueryToast(){
+                    const url = new URL(location.href);
+                    const message = url.searchParams.get('toast');
+                    const type = url.searchParams.get('toastType') || 'info';
+                    if(message){
+                      toast(message, type);
+                      url.searchParams.delete('toast');
+                      url.searchParams.delete('toastType');
+                      history.replaceState({}, document.title, url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '') + url.hash);
+                    }
+                  }
+
+                  parseQueryToast();
+
+                  if(!getCookie('bb_cookie_consent')){
+                    window.setTimeout(showCookieBanner, 240);
+                  }
+
+                  document.addEventListener('submit', (ev) => {
+                    const form = ev.target;
+                    if(!form || form.tagName !== 'FORM') return;
+                    if(form.action && form.action.includes('/admin/cookies')) return;
+                    toast('Processing…', 'info');
+                  });
+
                   function fmtDateTime(iso){
                     if(!iso) return '';
                     const d = new Date(iso);
@@ -432,8 +666,8 @@ public final class AdminPageChrome {
                     return `${yyyy}.${MM}.${dd} ${hh}:${mm} ${ap}`;
                   }
 
-                  function formatAllIso(){
-                    document.querySelectorAll('[data-iso]').forEach(el => {
+                  function formatAllIso(root){
+                    (root || document).querySelectorAll('[data-iso]').forEach(el => {
                       try{
                         const iso = el.getAttribute('data-iso') || '';
                         if(!iso) return;
@@ -442,7 +676,6 @@ public final class AdminPageChrome {
                     });
                   }
 
-                  // Reveal
                   const revealEls = Array.from(document.querySelectorAll('.bb-reveal, .card, .hero, .bb-loginCard'));
                   if('IntersectionObserver' in window){
                     const io = new IntersectionObserver((entries) => {
@@ -453,19 +686,17 @@ public final class AdminPageChrome {
                         }
                       }
                     }, { threshold: 0.08 });
-                    revealEls.forEach((el) => {
+                    revealEls.forEach((el, idx) => {
                       if(!el.classList.contains('bb-reveal')) el.classList.add('bb-reveal');
-                      el.style.transitionDelay = '0ms';
+                      el.style.transitionDelay = Math.min(idx * 40, 220) + 'ms';
                       io.observe(el);
                     });
                   }else{
                     revealEls.forEach(el => el.classList.add('in'));
                   }
 
-                  // Apply time formatting
                   formatAllIso();
 
-                  // Tables: sorting + filter + CSV
                   function detectType(sample){
                     const s = (sample ?? '').trim();
                     if(!s) return 'text';
@@ -473,6 +704,7 @@ public final class AdminPageChrome {
                     if (/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(s)) return 'date';
                     return 'text';
                   }
+
                   function parseValue(type, td){
                     if(!td) return '';
                     const ds = td.getAttribute('data-sort');
@@ -494,6 +726,7 @@ public final class AdminPageChrome {
                     }
                     return s.toLowerCase();
                   }
+
                   function toCsv(table){
                     const rows = Array.from(table.querySelectorAll('tr'))
                       .filter(tr => tr.style.display !== 'none');
@@ -506,6 +739,7 @@ public final class AdminPageChrome {
                       return cells.join(',');
                     }).join('\\n');
                   }
+
                   function initTable(table){
                     const tbody = table.querySelector('tbody');
                     const thead = table.querySelector('thead');
@@ -563,6 +797,7 @@ public final class AdminPageChrome {
                       const visible = all.filter(tr => tr.style.display !== 'none');
                       count.textContent = visible.length + ' / ' + all.length;
                     }
+
                     function applyFilter(){
                       const q = (search.value || '').trim().toLowerCase();
                       const rows = Array.from(tbody.querySelectorAll('tr'));
@@ -572,6 +807,7 @@ public final class AdminPageChrome {
                       }
                       updateCount();
                     }
+
                     search.addEventListener('input', applyFilter);
 
                     exportBtn.addEventListener('click', () => {
@@ -585,7 +821,7 @@ public final class AdminPageChrome {
                       a.click();
                       a.remove();
                       URL.revokeObjectURL(url);
-                      toast('CSV exported');
+                      toast('CSV exported', 'success');
                     });
 
                     if(tools){
@@ -596,22 +832,21 @@ public final class AdminPageChrome {
                     }
                     updateCount();
                   }
+
                   document.querySelectorAll('table').forEach(initTable);
 
-                  // Copy-to-clipboard
                   document.addEventListener('click', async (ev) => {
                     const el = ev.target && ev.target.closest ? ev.target.closest('[data-copy]') : null;
                     if(!el) return;
                     const value = el.getAttribute('data-copy') || '';
                     try{
                       await navigator.clipboard.writeText(value);
-                      toast('Copied');
+                      toast('Copied', 'success');
                     }catch(e){
-                      toast('Copy failed');
+                      toast('Copy failed', 'error');
                     }
                   });
 
-                  // Roles toggles (instant save) + green highlight for enabled cells
                   async function postForm(url, obj){
                     const body = new URLSearchParams();
                     for(const k in obj) body.set(k, String(obj[k]));
@@ -649,11 +884,11 @@ public final class AdminPageChrome {
                         permKey: permKey,
                         enabled: cb.checked ? '1' : '0'
                       });
-                      toast('Saved');
+                      toast('Saved', 'success');
                     }catch(e){
                       cb.checked = !cb.checked;
                       updatePermCellHighlight(cb);
-                      toast('Save failed');
+                      toast('Save failed', 'error');
                     }finally{
                       cb.disabled = false;
                     }

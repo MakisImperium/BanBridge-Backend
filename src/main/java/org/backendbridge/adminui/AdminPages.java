@@ -6,16 +6,9 @@ import org.backendbridge.repo.MetricsRepository;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Admin UI pages (SSR).
- *
- * Facade: keeps the public API stable while implementation is split across smaller classes.
- */
 public final class AdminPages {
 
     private AdminPages() {}
-
-    // ---------------- Login / Users / Roles ----------------
 
     public static String login(String serverName, Lang lang, String err) {
         return AdminPagesAuth.login(serverName, lang, err);
@@ -51,8 +44,6 @@ public final class AdminPages {
         return AdminPagesAuth.rolesWithPermissions(serverName, lang, msgHtml, roles, perms, rolePerms);
     }
 
-    // ---------------- Audit ----------------
-
     public static String audit(String serverName, Lang lang, String msgHtml, String filtersHtml, String rowsHtml, int resultCount) {
         return AdminPagesAuth.audit(serverName, lang, msgHtml, filtersHtml, rowsHtml, resultCount);
     }
@@ -65,20 +56,23 @@ public final class AdminPages {
         return AdminPagesAuth.auditRow(createdAtIso, actorUsername, actionKey, details, id);
     }
 
-    // ---------------- Players / Bans / Stats ----------------
-
-    public static String players(String serverName, Lang lang, long totalPlayers, long playersWithStats, long activeBans, long totalBans, String rowsHtml) {
-        return AdminPagesGame.players(serverName, lang, totalPlayers, playersWithStats, activeBans, totalBans, rowsHtml);
+    public static String players(
+            String serverName,
+            Lang lang,
+            long totalPlayers,
+            long playersWithStats,
+            long activeBans,
+            long totalBans,
+            String serverOptionsHtml,
+            String rowsHtml
+    ) {
+        return AdminPagesGame.players(serverName, lang, totalPlayers, playersWithStats, activeBans, totalBans, serverOptionsHtml, rowsHtml);
     }
 
     public static String bans(String serverName, Lang lang, long totalPlayers, long activeBans, long revokedBans, long totalBans, String rowsHtml) {
         return AdminPagesGame.bans(serverName, lang, totalPlayers, activeBans, revokedBans, totalBans, rowsHtml);
     }
 
-    /**
-     * Monitoring dashboard page.
-     * Uses SSE endpoint /admin/api/live/stream and fetches JSON from /admin/api/live/stats/history.
-     */
     public static String serverStats(String serverName, Lang lang, String serverKeyOrNull, MetricsRepository.Metrics latest) {
         return AdminPagesGame.serverStats(serverName, lang, serverKeyOrNull, latest);
     }
@@ -94,6 +88,8 @@ public final class AdminPages {
             String name,
             boolean online,
             String onlineUpdatedIso,
+            String onlineServerKey,
+            String onlineServerName,
             String lastSeenIso,
             long playtimeSeconds,
             long kills,
@@ -113,6 +109,8 @@ public final class AdminPages {
                 name,
                 online,
                 onlineUpdatedIso,
+                onlineServerKey,
+                onlineServerName,
                 lastSeenIso,
                 playtimeSeconds,
                 kills,
@@ -132,6 +130,7 @@ public final class AdminPages {
             String name,
             boolean online,
             String onlineUpdatedIso,
+            String onlineServerName,
             long playtimeSeconds,
             long kills,
             long deaths,
@@ -143,6 +142,7 @@ public final class AdminPages {
                 name,
                 online,
                 onlineUpdatedIso,
+                onlineServerName,
                 playtimeSeconds,
                 kills,
                 deaths,

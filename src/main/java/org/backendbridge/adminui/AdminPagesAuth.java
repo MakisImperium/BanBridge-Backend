@@ -11,18 +11,9 @@ import static org.backendbridge.adminui.AdminPageChrome.pageEndWithAppScript;
 import static org.backendbridge.adminui.AdminPageChrome.pageStart;
 import static org.backendbridge.adminui.AdminUiUtil.*;
 
-/**
- * Admin UI pages (SSR) – auth + user/role management + audit.
- *
- * Timestamp formatting:
- * - Always render ISO into data-iso attributes (and data-sort for tables)
- * - AdminPageChrome's global formatter applies Lang-based TZ + locale format.
- */
 final class AdminPagesAuth {
 
     private AdminPagesAuth() {}
-
-    // ---------------- Login ----------------
 
     static String login(String serverName, Lang lang, String err) {
         String tLoginFailedTitle = (lang == Lang.DE) ? "Login fehlgeschlagen" : "Login failed";
@@ -117,8 +108,6 @@ final class AdminPagesAuth {
         return "";
     }
 
-    // ---------------- Account ----------------
-
     static String account(String serverName, Lang lang, String msgHtml, String username) {
         String tTitle = (lang == Lang.DE) ? "Konto" : "Account";
         String tSubtitle = (lang == Lang.DE) ? "Passwort ändern" : "Change your password";
@@ -170,11 +159,6 @@ final class AdminPagesAuth {
         return html.toString();
     }
 
-    // ---------------- Users ----------------
-
-    /**
-     * Users page with non-root user dropdown for role changes and password reset.
-     */
     static String users(
             String serverName,
             Lang lang,
@@ -275,8 +259,6 @@ final class AdminPagesAuth {
         html.append(pageEndWithAppScript());
         return html.toString();
     }
-
-    // ---------------- Roles + Permissions ----------------
 
     static String rolesWithPermissions(
             String serverName,
@@ -389,8 +371,6 @@ final class AdminPagesAuth {
         return html.toString();
     }
 
-    // ---------------- Audit ----------------
-
     static String audit(String serverName, Lang lang, String msgHtml, String filtersHtml, String rowsHtml, int resultCount) {
         String tTitle = "Audit";
         String tSubtitle = (lang == Lang.DE) ? "Admin Aktionen (Filter)" : "Admin actions (filterable)";
@@ -402,11 +382,11 @@ final class AdminPagesAuth {
         html.append(heroCenter(tTitle, tSubtitle));
 
         html.append("""
-            <section class="card bb-reveal">
+            <section class="card bb-reveal" id="bbAuditRoot">
               <div class="pad">
                 %s
                 %s
-                <div class="mono" style="opacity:.7; margin-top:10px">%s: %d</div>
+                <div class="mono" style="opacity:.7; margin-top:10px">%s: <span id="bbAuditCount">%d</span></div>
               </div>
             </section>
             """.formatted(
@@ -416,14 +396,70 @@ final class AdminPagesAuth {
                 Math.max(0, resultCount)
         ));
 
-        html.append(tableStart(tTitle, null,
-                new Th((lang == Lang.DE) ? "Zeit" : "Time", "date"),
-                new Th((lang == Lang.DE) ? "Akteur" : "Actor", "text"),
-                new Th((lang == Lang.DE) ? "Aktion" : "Action", "text"),
-                new Th("Details", "text")
+        html.append("""
+            <div class="card bb-reveal bb-tableCard">
+              <div class="cardHead">
+                <div><b>%s</b></div>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+                  <div class="bb-tableTools" data-bb-tabletools></div>
+                </div>
+              </div>
+              <div class="pad" style="padding:0">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>%s</th>
+                      <th>%s</th>
+                      <th>%s</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bbAuditRows">
+                    %s
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """.formatted(
+                esc(tTitle),
+                esc((lang == Lang.DE) ? "Zeit" : "Time"),
+                esc((lang == Lang.DE) ? "Akteur" : "Actor"),
+                esc((lang == Lang.DE) ? "Aktion" : "Action"),
+                rowsHtml == null ? "" : rowsHtml
         ));
-        html.append(rowsHtml == null ? "" : rowsHtml);
-        html.append(tableEnd());
+
+        html.append("""
+            <script>
+              (function(){
+                const rowsEl = document.getElementById('bbAuditRows');
+                const countEl = document.getElementById('bbAuditCount');
+                if(!rowsEl) return;
+
+                async function reloadAudit(){
+                  const url = '/admin/api/live/audit' + location.search;
+                  const r = await fetch(url, { headers: { 'Accept':'application/json' } });
+                  if(!r.ok) throw new Error('HTTP ' + r.status);
+                  const j = await r.json();
+
+                  rowsEl.innerHTML = j.rowsHtml || '';
+                  if(countEl) countEl.textContent = String(j.resultCount || 0);
+                }
+
+                try{
+                  const es = new EventSource('/admin/api/live/stream');
+                  es.addEventListener('invalidate', (ev) => {
+                    try{
+                      const msg = JSON.parse(ev.data || '{}');
+                      const targets = Array.isArray(msg.targets) ? msg.targets : [];
+                      if(targets.includes('audit')){
+                        reloadAudit().catch(()=>{});
+                      }
+                    }catch(e){}
+                  });
+                }catch(e){}
+              })();
+            </script>
+            """);
 
         html.append(appShellEnd());
         html.append(pageEndWithAppScript());

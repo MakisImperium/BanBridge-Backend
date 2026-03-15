@@ -11,24 +11,29 @@ import static org.backendbridge.adminui.AdminPageChrome.pageEndWithAppScript;
 import static org.backendbridge.adminui.AdminPageChrome.pageStart;
 import static org.backendbridge.adminui.AdminUiUtil.*;
 
-/**
- * Admin UI pages (SSR) – players/bans/stats.
- *
- * Timestamp formatting:
- * - Always render ISO into data-iso attributes (and data-sort for tables)
- * - AdminPageChrome's global formatter applies Lang-based TZ + locale format.
- */
 final class AdminPagesGame {
 
     private AdminPagesGame() {}
 
-    // ---------------- Players / Bans / Stats ----------------
-
-    static String players(String serverName, Lang lang, long totalPlayers, long playersWithStats, long activeBans, long totalBans, String rowsHtml) {
+    static String players(
+            String serverName,
+            Lang lang,
+            long totalPlayers,
+            long playersWithStats,
+            long activeBans,
+            long totalBans,
+            String serverOptionsHtml,
+            String rowsHtml
+    ) {
         String tTitle = (lang == Lang.DE) ? "Spieler" : "Players";
         String tSubtitle = (lang == Lang.DE) ? "Übersicht (klick für Details)" : "Players overview (click a player for details)";
+        String tBroadcast = (lang == Lang.DE) ? "Broadcast" : "Broadcast";
+        String tMessage = (lang == Lang.DE) ? "Nachricht" : "Message";
+        String tSend = (lang == Lang.DE) ? "Senden" : "Send";
+        String tTarget = (lang == Lang.DE) ? "Server wählen" : "Select server";
+        String tAllServers = (lang == Lang.DE) ? "Alle Server" : "All servers";
 
-        StringBuilder html = new StringBuilder(140_000);
+        StringBuilder html = new StringBuilder(170_000);
         html.append(pageStart(tTitle + " • " + esc(serverName)));
         html.append(appShellStart("players", serverName, lang));
         html.append(heroCenter(serverName, tSubtitle));
@@ -39,14 +44,14 @@ final class AdminPagesGame {
         String kTotalBans = (lang == Lang.DE) ? "Bans gesamt" : "Total Bans";
 
         html.append("""
-            <section class="card bb-reveal">
+            <section class="card bb-reveal" id="bbPlayersRoot">
               <div class="cardHead"><div><b>KPIs</b></div></div>
               <div class="pad">
                 <div class="mono" style="display:flex; flex-wrap:wrap; gap:10px;">
-                  <span class="badge">%s: %d</span>
-                  <span class="badge">%s: %d</span>
-                  <span class="badge">%s: %d</span>
-                  <span class="badge">%s: %d</span>
+                  <span class="badge">%s: <span id="bbPlayersTotal">%d</span></span>
+                  <span class="badge">%s: <span id="bbPlayersWithStats">%d</span></span>
+                  <span class="badge">%s: <span id="bbPlayersActiveBans">%d</span></span>
+                  <span class="badge">%s: <span id="bbPlayersTotalBans">%d</span></span>
                 </div>
               </div>
             </section>
@@ -57,18 +62,109 @@ final class AdminPagesGame {
                 esc(kTotalBans), totalBans
         ));
 
-        html.append(tableStart(tTitle, null,
-                new Th("XUID", "text"),
-                new Th("Name", "text"),
-                new Th("Status", "text"),
-                new Th((lang == Lang.DE) ? "Spielzeit" : "Playtime", "num"),
-                new Th("Kills", "num"),
-                new Th("Deaths", "num"),
-                new Th((lang == Lang.DE) ? "Zuletzt gesehen" : "Last Seen", "date"),
-                new Th((lang == Lang.DE) ? "Stats aktualisiert" : "Stats Updated", "date")
+        html.append("""
+            <section class="card bb-reveal">
+              <div class="cardHead"><div><b>%s</b></div></div>
+              <div class="pad">
+                <form method="post" action="/admin/players/broadcast" class="form" style="max-width:720px">
+                  <select class="inp" name="serverKey" required>
+                    <option value="__all__">%s</option>
+                    %s
+                  </select>
+                  <textarea class="inp" name="message" rows="4" placeholder="%s" required></textarea>
+                  <div style="display:flex; justify-content:flex-end">
+                    <button class="btn primary" type="submit">%s</button>
+                  </div>
+                </form>
+              </div>
+            </section>
+            """.formatted(
+                esc(tBroadcast),
+                esc(tAllServers),
+                serverOptionsHtml == null ? "" : serverOptionsHtml,
+                escAttr(tMessage),
+                esc(tSend)
         ));
-        html.append(rowsHtml == null ? "" : rowsHtml);
-        html.append(tableEnd());
+
+        html.append("""
+            <div class="card bb-reveal bb-tableCard">
+              <div class="cardHead">
+                <div><b>%s</b></div>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+                  <div class="mono" style="opacity:.75">%s</div>
+                  <div class="bb-tableTools" data-bb-tabletools></div>
+                </div>
+              </div>
+              <div class="pad" style="padding:0">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>XUID</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th>%s</th>
+                      <th>%s</th>
+                      <th>Kills</th>
+                      <th>Deaths</th>
+                      <th>%s</th>
+                      <th>%s</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bbPlayersRows">
+                    %s
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """.formatted(
+                esc(tTitle),
+                esc(tTarget),
+                esc((lang == Lang.DE) ? "Server" : "Server"),
+                esc((lang == Lang.DE) ? "Spielzeit" : "Playtime"),
+                esc((lang == Lang.DE) ? "Zuletzt gesehen" : "Last Seen"),
+                esc((lang == Lang.DE) ? "Stats aktualisiert" : "Stats Updated"),
+                rowsHtml == null ? "" : rowsHtml
+        ));
+
+        html.append("""
+            <script>
+              (function(){
+                const rowsEl = document.getElementById('bbPlayersRows');
+                if(!rowsEl) return;
+
+                async function reloadPlayers(){
+                  const r = await fetch('/admin/api/live/players', { headers: { 'Accept':'application/json' } });
+                  if(!r.ok) throw new Error('HTTP ' + r.status);
+                  const j = await r.json();
+
+                  rowsEl.innerHTML = j.rowsHtml || '';
+
+                  const total = document.getElementById('bbPlayersTotal');
+                  const withStats = document.getElementById('bbPlayersWithStats');
+                  const activeBans = document.getElementById('bbPlayersActiveBans');
+                  const totalBans = document.getElementById('bbPlayersTotalBans');
+
+                  if(total) total.textContent = String(j.totalPlayers ?? 0);
+                  if(withStats) withStats.textContent = String(j.playersWithStats ?? 0);
+                  if(activeBans) activeBans.textContent = String(j.activeBans ?? 0);
+                  if(totalBans) totalBans.textContent = String(j.totalBans ?? 0);
+                }
+
+                try{
+                  const es = new EventSource('/admin/api/live/stream');
+                  es.addEventListener('invalidate', (ev) => {
+                    try{
+                      const msg = JSON.parse(ev.data || '{}');
+                      const targets = Array.isArray(msg.targets) ? msg.targets : [];
+                      if(targets.includes('players')){
+                        reloadPlayers().catch(()=>{});
+                      }
+                    }catch(e){}
+                  });
+                }catch(e){}
+              })();
+            </script>
+            """);
 
         html.append(appShellEnd());
         html.append(pageEndWithAppScript());
@@ -90,14 +186,14 @@ final class AdminPagesGame {
         String kTotalBans = (lang == Lang.DE) ? "Bans gesamt" : "Total Bans";
 
         html.append("""
-            <section class="card bb-reveal">
+            <section class="card bb-reveal" id="bbBansRoot">
               <div class="cardHead"><div><b>KPIs</b></div></div>
               <div class="pad">
                 <div class="mono" style="display:flex; flex-wrap:wrap; gap:10px;">
-                  <span class="badge">%s: %d</span>
-                  <span class="badge">%s: %d</span>
-                  <span class="badge">%s: %d</span>
-                  <span class="badge">%s: %d</span>
+                  <span class="badge">%s: <span id="bbBansPlayers">%d</span></span>
+                  <span class="badge">%s: <span id="bbBansActive">%d</span></span>
+                  <span class="badge">%s: <span id="bbBansRevoked">%d</span></span>
+                  <span class="badge">%s: <span id="bbBansTotal">%d</span></span>
                 </div>
               </div>
             </section>
@@ -108,30 +204,87 @@ final class AdminPagesGame {
                 esc(kTotalBans), totalBans
         ));
 
-        html.append(tableStart(tTitle, null,
-                new Th("ban_id", "num"),
-                new Th("xuid", "text"),
-                new Th((lang == Lang.DE) ? "Grund" : "reason", "text"),
-                new Th("created_at", "date"),
-                new Th("expires_at", "date"),
-                new Th("revoked_at", "date"),
-                new Th("updated_at", "date")
+        html.append("""
+            <div class="card bb-reveal bb-tableCard">
+              <div class="cardHead">
+                <div><b>%s</b></div>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+                  <div class="bb-tableTools" data-bb-tabletools></div>
+                </div>
+              </div>
+              <div class="pad" style="padding:0">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ban_id</th>
+                      <th>xuid</th>
+                      <th>%s</th>
+                      <th>created_at</th>
+                      <th>expires_at</th>
+                      <th>revoked_at</th>
+                      <th>updated_at</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bbBansRows">
+                    %s
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """.formatted(
+                esc(tTitle),
+                esc((lang == Lang.DE) ? "Grund" : "reason"),
+                rowsHtml == null ? "" : rowsHtml
         ));
-        html.append(rowsHtml == null ? "" : rowsHtml);
-        html.append(tableEnd());
+
+        html.append("""
+            <script>
+              (function(){
+                const rowsEl = document.getElementById('bbBansRows');
+                if(!rowsEl) return;
+
+                async function reloadBans(){
+                  const r = await fetch('/admin/api/live/bans', { headers: { 'Accept':'application/json' } });
+                  if(!r.ok) throw new Error('HTTP ' + r.status);
+                  const j = await r.json();
+
+                  rowsEl.innerHTML = j.rowsHtml || '';
+
+                  const totalPlayers = document.getElementById('bbBansPlayers');
+                  const activeBans = document.getElementById('bbBansActive');
+                  const revokedBans = document.getElementById('bbBansRevoked');
+                  const totalBans = document.getElementById('bbBansTotal');
+
+                  if(totalPlayers) totalPlayers.textContent = String(j.totalPlayers ?? 0);
+                  if(activeBans) activeBans.textContent = String(j.activeBans ?? 0);
+                  if(revokedBans) revokedBans.textContent = String(j.revokedBans ?? 0);
+                  if(totalBans) totalBans.textContent = String(j.totalBans ?? 0);
+                }
+
+                try{
+                  const es = new EventSource('/admin/api/live/stream');
+                  es.addEventListener('invalidate', (ev) => {
+                    try{
+                      const msg = JSON.parse(ev.data || '{}');
+                      const targets = Array.isArray(msg.targets) ? msg.targets : [];
+                      if(targets.includes('bans')){
+                        reloadBans().catch(()=>{});
+                      }
+                    }catch(e){}
+                  });
+                }catch(e){}
+              })();
+            </script>
+            """);
 
         html.append(appShellEnd());
         html.append(pageEndWithAppScript());
         return html.toString();
     }
 
-    /**
-     * Monitoring dashboard page.
-     * Uses SSE endpoint /admin/api/live/stream and fetches JSON from /admin/api/live/stats/history.
-     */
     static String serverStats(String serverName, Lang lang, String serverKeyOrNull, MetricsRepository.Metrics latest) {
-        String tTitle = (lang == Lang.DE) ? "Server Performance" : "Server Performance";
-        String tSubtitle = (lang == Lang.DE) ? "Monitoring dashboard (auto-updates)" : "Monitoring dashboard (auto-updates)";
+        String tTitle = "Server Performance";
+        String tSubtitle = "Monitoring dashboard (auto-updates)";
 
         StringBuilder html = new StringBuilder(270_000);
         html.append(pageStart(tTitle + " • " + esc(serverName)));
@@ -507,8 +660,6 @@ final class AdminPagesGame {
         }
     }
 
-    // ---------------- Player details + rows ----------------
-
     static String playerNotFound(String serverName, Lang lang) {
         String tTitle = (lang == Lang.DE) ? "Spieler" : "Player";
         String tSubtitle = (lang == Lang.DE) ? "Nicht gefunden" : "Not found";
@@ -531,6 +682,8 @@ final class AdminPagesGame {
             String name,
             boolean online,
             String onlineUpdatedIso,
+            String onlineServerKey,
+            String onlineServerName,
             String lastSeenIso,
             long playtimeSeconds,
             long kills,
@@ -543,13 +696,14 @@ final class AdminPagesGame {
             String banUpdatedAtIso,
             List<AdminRepository.BanEvent> events
     ) {
-        StringBuilder html = new StringBuilder(170_000);
+        StringBuilder html = new StringBuilder(210_000);
         html.append(pageStart(((lang == Lang.DE) ? "Spieler" : "Player") + " • " + esc(name)));
         html.append(appShellStart("players", serverName, lang));
 
         String statusPill = online ? "<span class='pill pill-ok'>online</span>" : "<span class='pill pill-warn'>offline</span>";
         String onlineIso = onlineUpdatedIso == null ? "" : onlineUpdatedIso;
         String lastSeen = lastSeenIso == null ? "" : lastSeenIso;
+        String onlineServer = (onlineServerName == null || onlineServerName.isBlank()) ? "—" : onlineServerName;
 
         html.append(heroCenter((lang == Lang.DE) ? "Spieler" : "Player", name));
 
@@ -570,6 +724,10 @@ final class AdminPagesGame {
                       %s
                       <span class="mono" style="opacity:.7; margin-left:8px" data-iso="%s" data-sort="%s"></span>
                     </div>
+                  </div>
+                  <div>
+                    <div style="opacity:.7">%s</div>
+                    <div class="mono" style="margin-top:4px">%s</div>
                   </div>
                   <div>
                     <div style="opacity:.7">%s</div>
@@ -597,6 +755,8 @@ final class AdminPagesGame {
                 statusPill,
                 escAttr(onlineIso),
                 escAttr(onlineIso),
+                esc((lang == Lang.DE) ? "Online auf Server" : "Online on server"),
+                esc(onlineServer),
                 esc((lang == Lang.DE) ? "Zuletzt gesehen" : "Last Seen"),
                 escAttr(lastSeen),
                 escAttr(lastSeen),
@@ -617,6 +777,56 @@ final class AdminPagesGame {
                 esc((lang == Lang.DE) ? "Moderation" : "Moderation"),
                 moderationForm(xuid, hasActiveBan, lang)
         ));
+
+        html.append("""
+            <section class="card bb-reveal">
+              <div class="cardHead"><div><b>%s</b></div></div>
+              <div class="pad">
+            """.formatted(esc((lang == Lang.DE) ? "Live Aktionen" : "Live actions")));
+
+        if (online && onlineServerKey != null && !onlineServerKey.isBlank()) {
+            html.append("""
+                <div style="display:grid; gap:14px; grid-template-columns:repeat(2,minmax(0,1fr));">
+                  <form method="post" action="/admin/player/kick" class="form">
+                    <input type="hidden" name="xuid" value="%s">
+                    <input type="hidden" name="serverKey" value="%s">
+                    <input class="inp" name="reason" placeholder="%s" required>
+                    <div style="display:flex; justify-content:flex-end">
+                      <button class="btn danger" type="submit">%s</button>
+                    </div>
+                  </form>
+
+                  <form method="post" action="/admin/player/message" class="form">
+                    <input type="hidden" name="xuid" value="%s">
+                    <input type="hidden" name="serverKey" value="%s">
+                    <textarea class="inp" name="message" rows="3" placeholder="%s" required></textarea>
+                    <div style="display:flex; justify-content:flex-end">
+                      <button class="btn primary" type="submit">%s</button>
+                    </div>
+                  </form>
+                </div>
+                """.formatted(
+                    escAttr(xuid),
+                    escAttr(onlineServerKey),
+                    escAttr((lang == Lang.DE) ? "Kick Grund" : "Kick reason"),
+                    esc((lang == Lang.DE) ? "Kick" : "Kick"),
+                    escAttr(xuid),
+                    escAttr(onlineServerKey),
+                    escAttr((lang == Lang.DE) ? "Nachricht an Spieler" : "Message to player"),
+                    esc((lang == Lang.DE) ? "Nachricht senden" : "Send message")
+            ));
+        } else {
+            html.append("""
+                <div class="mono" style="opacity:.75">%s</div>
+                """.formatted(esc((lang == Lang.DE)
+                    ? "Spieler ist aktuell offline. Kick und Direktnachricht sind nur online möglich."
+                    : "Player is currently offline. Kick and direct message are only available while online.")));
+        }
+
+        html.append("""
+              </div>
+            </section>
+            """);
 
         if (hasActiveBan) {
             String created = banCreatedAtIso == null ? "" : banCreatedAtIso;
@@ -681,6 +891,7 @@ final class AdminPagesGame {
             String name,
             boolean online,
             String onlineUpdatedIso,
+            String onlineServerName,
             long playtimeSeconds,
             long kills,
             long deaths,
@@ -701,6 +912,7 @@ final class AdminPagesGame {
                 + escAttr(onlineUpdatedIso)
                 + "'></span>";
 
+        String server = (onlineServerName == null || onlineServerName.isBlank()) ? "—" : onlineServerName;
         String lastSeen = lastSeenIso == null ? "" : lastSeenIso;
         String statsUpdated = statsUpdatedIso == null ? "" : statsUpdatedIso;
 
@@ -711,6 +923,7 @@ final class AdminPagesGame {
               </td>
               <td>%s</td>
               <td class="mono">%s %s</td>
+              <td class="mono">%s</td>
               <td class="mono" data-sort="%d">%s</td>
               <td class="mono" data-sort="%d">%d</td>
               <td class="mono" data-sort="%d">%d</td>
@@ -725,6 +938,7 @@ final class AdminPagesGame {
                 esc(name),
                 status,
                 statusHint,
+                esc(server),
                 playtimeSeconds, esc(formatSeconds(playtimeSeconds)),
                 kills, kills,
                 deaths, deaths,

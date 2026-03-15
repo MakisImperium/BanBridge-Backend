@@ -39,7 +39,7 @@ public final class CommandsRepository {
      * {
      *   "serverTime": "ISO-8601",
      *   "commands": [
-     *     { "id": 1, "type": "SHUTDOWN", "createdAt": "...", "payloadJson": "{...}" }
+     *     { "id": 1, "cmdType": "SHUTDOWN", "createdAt": "...", "payloadJson": "" }
      *   ]
      * }
      */
@@ -70,15 +70,15 @@ public final class CommandsRepository {
                     first = false;
 
                     long id = rs.getLong("id");
-                    String type = rs.getString("cmd_type");
+                    String cmdType = rs.getString("cmd_type");
                     String payload = rs.getString("payload_json");
                     String createdAt = rs.getTimestamp("created_at").toInstant().toString();
 
                     out.append("{")
                             .append("\"id\":").append(id).append(',')
-                            .append("\"type\":").append(Json.js(type == null ? "" : type.toUpperCase(Locale.ROOT))).append(',')
+                            .append("\"cmdType\":").append(Json.js(cmdType == null ? "" : cmdType.toUpperCase(Locale.ROOT))).append(',')
                             .append("\"createdAt\":").append(Json.js(createdAt)).append(',')
-                            .append("\"payloadJson\":").append(payload == null || payload.isBlank() ? "null" : Json.js(payload))
+                            .append("\"payloadJson\":").append(Json.js(payload == null || payload.isBlank() ? "" : payload))
                             .append("}");
                 }
             }

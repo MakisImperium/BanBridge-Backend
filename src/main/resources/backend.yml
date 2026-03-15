@@ -22,3 +22,4 @@ admin:
   # Leave empty to auto-generate a root password on first start (printed to console once)
   # Or paste a PBKDF2 hash from PasswordUtil.hashPbkdf2("yourPassword")
   rootPasswordHash: ""
+  broadcastPrefix: "§8[§3◆§bBackendBridge§3◆§8] §r"
